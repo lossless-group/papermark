@@ -20,6 +20,14 @@ function isAnalyticsPath(path: string) {
 }
 
 function isCustomDomain(host: string) {
+  // Self-host: the app's own domain (NEXT_PUBLIC_APP_BASE_HOST) is the PLATFORM
+  // app surface, not a customer custom domain. Without this, a self-host domain
+  // (e.g. *.up.railway.app or lossless.at) falls into the "not a known platform
+  // host" branch below and gets routed to DomainMiddleware, 404ing /dashboard,
+  // /login, etc.
+  const __appHost = process.env.NEXT_PUBLIC_APP_BASE_HOST?.toLowerCase().trim();
+  const __bare = host?.split(":")[0]?.toLowerCase().trim();
+  if (__appHost && __bare === __appHost) return false;
   return (
     (process.env.NODE_ENV === "development" &&
       (host?.includes(".local") || host?.includes("papermark.dev"))) ||
