@@ -1,3 +1,4 @@
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/router";
 
@@ -8,6 +9,7 @@ import { DocumentAIDialog } from "@/ee/features/ai/components/document-ai-dialog
 import { PlanEnum } from "@/ee/stripe/constants";
 import { Document, DocumentVersion } from "@prisma/client";
 import {
+  ArchiveXIcon,
   ArrowRightIcon,
   BetweenHorizontalStartIcon,
   ChevronRight,
@@ -16,7 +18,9 @@ import {
   FileDownIcon,
   FileSpreadsheetIcon,
   FolderIcon,
+  FolderInputIcon,
   MoonIcon,
+  ScanEyeIcon,
   ServerIcon,
   SheetIcon,
   SunIcon,
@@ -28,6 +32,8 @@ import { toast } from "sonner";
 import { mutate } from "swr";
 
 import { getFile } from "@/lib/files/get-file";
+import { useFeatureFlags } from "@/lib/hooks/use-feature-flags";
+import { useSelfMembership } from "@/lib/hooks/use-self-membership";
 import { usePlan } from "@/lib/swr/use-billing";
 import useDataroomsSimple from "@/lib/swr/use-datarooms-simple";
 import { useTeamAI } from "@/lib/swr/use-team-ai";
@@ -63,6 +69,24 @@ import {
 
 import PlanBadge from "../billing/plan-badge";
 import { UpgradePlanModal } from "../billing/upgrade-plan-modal";
+
+// Redaction dialogs are only opened on demand from the 3-dot menu. Dynamic
+// imports keep their (lucide + radix + feature code) off the document-page
+// initial bundle.
+const RedactionJobsDialog = dynamic(
+  () =>
+    import("@/ee/features/redaction/components/redaction-jobs-dialog").then(
+      (mod) => ({ default: mod.RedactionJobsDialog }),
+    ),
+  { ssr: false },
+);
+const RedactionConfigDialog = dynamic(
+  () =>
+    import("@/ee/features/redaction/components/redaction-config-dialog").then(
+      (mod) => ({ default: mod.RedactionConfigDialog }),
+    ),
+  { ssr: false },
+);
 import AdvancedSheet from "../shared/icons/advanced-sheet";
 import PortraitLandscape from "../shared/icons/portrait-landscape";
 import LoadingSpinner from "../ui/loading-spinner";
@@ -71,6 +95,7 @@ import { AddDocumentModal } from "./add-document-modal";
 import { AddToDataroomModal } from "./add-document-to-dataroom-modal";
 import AlertBanner from "./alert";
 import { ExportVisitsModal } from "./export-visits-modal";
+import { MoveToFolderModal } from "./move-folder-modal";
 
 export default function DocumentHeader({
   prismaDocument,
@@ -78,28 +103,47 @@ export default function DocumentHeader({
   teamId,
   actions,
   onBulkImportLinks,
+  dataroomId,
+  dataroomDocumentId,
 }: {
   prismaDocument: DocumentWithVersion;
   primaryVersion: DocumentVersion;
   teamId: string;
   actions?: React.ReactNode[];
   onBulkImportLinks?: () => void;
+  /**
+   * When the header is rendered inside a data room (the dataroom document
+   * page), these identify the DataroomDocument so dataroom members can remove
+   * it from the room instead of deleting the underlying document.
+   */
+  dataroomId?: string;
+  dataroomDocumentId?: string;
 }) {
   const router = useRouter();
   const teamInfo = useTeam();
   const { datarooms } = useDataroomsSimple();
+  const { isDataroomMember } = useSelfMembership();
+  // Data room members may only remove a document from the room, never delete
+  // the underlying document. Requires the dataroom context to be provided.
+  const canRemoveFromDataroom = Boolean(dataroomId && dataroomDocumentId);
+  const showRemoveFromDataroom = isDataroomMember && canRemoveFromDataroom;
   const { theme, systemTheme } = useTheme();
   const isLight =
     theme === "light" || (theme === "system" && systemTheme === "light");
   const { isPro, isFree, isTrial, isBusiness, isDatarooms } = usePlan();
   const { canUseAI, isAIEnabled } = useTeamAI();
+  const { isFeatureEnabled } = useFeatureFlags();
+  const isRedactionEnabled = isFeatureEnabled("redaction");
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
   const [isFirstClick, setIsFirstClick] = useState<boolean>(false);
   const [orientationLoading, setOrientationLoading] = useState<boolean>(false);
   const [addDataRoomOpen, setAddDataRoomOpen] = useState<boolean>(false);
+  const [moveFolderOpen, setMoveFolderOpen] = useState<boolean>(false);
   const [addDocumentVersion, setAddDocumentVersion] = useState<boolean>(false);
   const [openAddDocModal, setOpenAddDocModal] = useState<boolean>(false);
+  const [redactionJobsOpen, setRedactionJobsOpen] = useState<boolean>(false);
+  const [redactionConfigOpen, setRedactionConfigOpen] = useState<boolean>(false);
   const [planModalOpen, setPlanModalOpen] = useState<boolean>(false);
   const [planModalTrigger, setPlanModalTrigger] = useState<string>("");
   const [selectedPlan, setSelectedPlan] = useState<PlanEnum>(PlanEnum.Pro);
@@ -462,6 +506,45 @@ export default function DocumentHeader({
     );
   };
 
+  const handleRemoveFromDataroom = async () => {
+    if (!dataroomId || !dataroomDocumentId) return;
+
+    toast.promise(
+      fetch(
+        `/api/teams/${teamId}/datarooms/${dataroomId}/documents/${dataroomDocumentId}`,
+        {
+          method: "DELETE",
+        },
+      ).then(async (res) => {
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({}));
+          throw new Error(error.message || "Failed to remove document");
+        }
+        setIsFirstClick(false);
+        setMenuOpen(false);
+        router.push(`/datarooms/${dataroomId}/documents`);
+      }),
+      {
+        loading: "Removing document...",
+        success: "Document removed from data room.",
+        error: (err) => err.message || "Failed to remove document. Try again.",
+      },
+    );
+  };
+
+  const handleRemoveButtonClick = (event: any) => {
+    event.stopPropagation();
+    event.preventDefault();
+
+    if (isFirstClick) {
+      handleRemoveFromDataroom();
+      setIsFirstClick(false);
+      setMenuOpen(false);
+    } else {
+      setIsFirstClick(true);
+    }
+  };
+
   const handleMenuStateChange = (open: boolean) => {
     if (isFirstClick) {
       setMenuOpen(true); // Keep the dropdown open on the first click
@@ -607,6 +690,7 @@ export default function DocumentHeader({
             primaryVersion.type !== "link" && (
               <AddDocumentModal
                 newVersion
+                documentId={prismaDocument.id}
                 openModal={openAddDocModal}
                 setAddDocumentModalOpen={setOpenAddDocModal}
               >
@@ -696,6 +780,7 @@ export default function DocumentHeader({
                     <DropdownMenuItem>
                       <AddDocumentModal
                         newVersion
+                        documentId={prismaDocument.id}
                         setAddDocumentModalOpen={setAddDocumentVersion}
                       >
                         <button
@@ -731,12 +816,38 @@ export default function DocumentHeader({
                       : "Enable Advanced Mode"}
                   </DropdownMenuItem>
                 )}
+              {!dataroomId && !isDataroomMember && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setIsFirstClick(false);
+                    setMenuOpen(false);
+                    setMoveFolderOpen(true);
+                  }}
+                >
+                  <FolderInputIcon className="mr-2 h-4 w-4" />
+                  Move to folder
+                </DropdownMenuItem>
+              )}
+
               {datarooms && datarooms.length !== 0 && (
                 <DropdownMenuItem onClick={() => setAddDataRoomOpen(true)}>
                   <BetweenHorizontalStartIcon className="mr-2 h-4 w-4" />
                   Add to dataroom
                 </DropdownMenuItem>
               )}
+
+              {/* Redaction jobs - beta, PDFs only */}
+              {isRedactionEnabled && primaryVersion.type === "pdf" ? (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setRedactionJobsOpen(true);
+                    setMenuOpen(false);
+                  }}
+                >
+                  <ScanEyeIcon className="mr-2 h-4 w-4" />
+                  Redaction jobs
+                </DropdownMenuItem>
+              ) : null}
 
               {onBulkImportLinks && (
                 <DropdownMenuItem
@@ -857,13 +968,29 @@ export default function DocumentHeader({
 
               <DropdownMenuSeparator />
 
-              <DropdownMenuItem
-                className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
-                onClick={(event) => handleButtonClick(event, prismaDocument.id)}
-              >
-                <TrashIcon className="mr-2 h-4 w-4" />
-                {isFirstClick ? "Really delete?" : "Delete document"}
-              </DropdownMenuItem>
+              {isDataroomMember ? (
+                // Data room members can only remove a document from the room,
+                // never delete the underlying document for the whole team.
+                showRemoveFromDataroom ? (
+                  <DropdownMenuItem
+                    className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+                    onClick={handleRemoveButtonClick}
+                  >
+                    <ArchiveXIcon className="mr-2 h-4 w-4" />
+                    {isFirstClick ? "Really remove?" : "Remove from data room"}
+                  </DropdownMenuItem>
+                ) : null
+              ) : (
+                <DropdownMenuItem
+                  className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+                  onClick={(event) =>
+                    handleButtonClick(event, prismaDocument.id)
+                  }
+                >
+                  <TrashIcon className="mr-2 h-4 w-4" />
+                  {isFirstClick ? "Really delete?" : "Delete document"}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1012,6 +1139,16 @@ export default function DocumentHeader({
         />
       ) : null}
 
+      {moveFolderOpen ? (
+        <MoveToFolderModal
+          open={moveFolderOpen}
+          setOpen={setMoveFolderOpen}
+          documentIds={[prismaDocument.id]}
+          itemName={prismaDocument.name}
+          folderParentId={prismaDocument.folderId!}
+        />
+      ) : null}
+
       {planModalOpen ? (
         <UpgradePlanModal
           clickedPlan={selectedPlan}
@@ -1038,6 +1175,28 @@ export default function DocumentHeader({
         agentsEnabled={prismaDocument.agentsEnabled}
         vectorStoreFileId={primaryVersion.vectorStoreFileId}
       />
+
+      {isRedactionEnabled && primaryVersion.type === "pdf" ? (
+        <>
+          {redactionJobsOpen ? (
+            <RedactionJobsDialog
+              open={redactionJobsOpen}
+              onOpenChange={setRedactionJobsOpen}
+              documentId={prismaDocument.id}
+              documentName={prismaDocument.name}
+              onStartNew={() => setRedactionConfigOpen(true)}
+            />
+          ) : null}
+          {redactionConfigOpen ? (
+            <RedactionConfigDialog
+              open={redactionConfigOpen}
+              onOpenChange={setRedactionConfigOpen}
+              documentId={prismaDocument.id}
+              documentName={prismaDocument.name}
+            />
+          ) : null}
+        </>
+      ) : null}
     </header>
   );
 }

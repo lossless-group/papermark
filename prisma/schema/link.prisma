@@ -71,6 +71,9 @@ model Link {
   enableConversation Boolean        @default(false) // Controls if conversations are allowed on this link
   conversations      Conversation[]
 
+  // Buy-side Q&A: question assignments routed to this link
+  questionAssignments DataroomQuestionAssignment[]
+
   // FAQ system
   dataroomFaqItems DataroomFaqItem[]
 
@@ -102,6 +105,9 @@ model Link {
 
   // visitor groups for allow-list
   visitorGroups LinkVisitorGroup[]
+
+  // request list (task system) — link-targeted assignments
+  taskAssignments TaskAssignment[]
 
   // workflow entry link
   workflow Workflow?

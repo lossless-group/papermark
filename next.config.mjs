@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   pageExtensions: ["js", "jsx", "ts", "tsx", "mdx"],
-  transpilePackages: ["@boxyhq/saml-jackson"],
+  transpilePackages: ["@boxyhq/saml-jackson", "@libpdf/core"],
   images: {
     minimumCacheTTL: 2592000, // 30 days
     remotePatterns: prepareRemotePatterns(),
@@ -163,6 +163,13 @@ const nextConfig = {
         permanent: false,
       },
       {
+        // The plan picker moved to /settings/billing/upgrade (App Router).
+        // Keep the old path working for bookmarks and previously sent emails.
+        source: "/settings/upgrade",
+        destination: "/settings/billing/upgrade",
+        permanent: false,
+      },
+      {
         source: "/:path*",
         destination: "https://presentation.atelierbatalla.com/:path*",
         permanent: true,
@@ -312,6 +319,15 @@ const nextConfig = {
     ];
   },
   experimental: {
+    // Rewrite barrel imports (e.g. `import { Icon } from "lucide-react"`) to
+    // direct submodule imports at build time. Cuts dev boot, cold starts and
+    // HMR for these large re-export packages without losing ergonomic imports.
+    optimizePackageImports: [
+      "lucide-react",
+      "@tremor/react",
+      "date-fns",
+      "lodash",
+    ],
     outputFileTracingIncludes: {
       "/api/mupdf/*": ["./node_modules/mupdf/dist/*.wasm"],
       // Jackson SAML routes need jose + openid-client for crypto
@@ -328,7 +344,9 @@ const nextConfig = {
     // oidc-provider uses Koa which has dynamic requires that webpack can't
     // statically analyze. Keep them out of the bundle; they'll be loaded at
     // runtime from node_modules.
-    serverComponentsExternalPackages: ["oidc-provider", "koa"],
+    // jsonpath (a dub dependency) reads its grammar file from disk at module
+    // load, which breaks when webpack bundles it into app-router routes.
+    serverComponentsExternalPackages: ["oidc-provider", "koa", "jsonpath"],
   },
   webpack: (config, { isServer }) => {
     // oidc-provider depends on Koa which uses dynamic requires webpack can't

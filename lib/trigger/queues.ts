@@ -39,9 +39,25 @@ export const processDocumentForAIQueue = queue({
   concurrencyLimit: 10,
 });
 
+export const signingTemplateSetupQueue = queue({
+  name: "signing-template-setup",
+  concurrencyLimit: 5,
+});
+
 export const addFileToVectorStoreQueue = queue({
   name: "add-file-to-vector-store",
   concurrencyLimit: 10,
+});
+
+// Redaction queues
+export const detectRedactionsQueue = queue({
+  name: "detect-redactions",
+  concurrencyLimit: 5,
+});
+
+export const applyRedactionsQueue = queue({
+  name: "apply-redactions",
+  concurrencyLimit: 5,
 });
 
 // Plan-based conversion queues (used at trigger time)

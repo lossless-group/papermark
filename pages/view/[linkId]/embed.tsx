@@ -5,20 +5,23 @@ import { useEffect, useState } from "react";
 import NotFound from "@/pages/404";
 
 import { useAnalytics } from "@/lib/analytics";
+import { useUrlPasscode } from "@/lib/hooks/use-url-passcode";
 
 import LoadingSpinner from "@/components/ui/loading-spinner";
 import DataroomView from "@/components/view/dataroom/dataroom-view";
 import DocumentView from "@/components/view/document-view";
+import { ViewerI18nProvider } from "@/components/view/viewer-i18n-provider";
 
 import { ViewPageProps } from "./index";
 
 // Reuse the same getStaticProps and getStaticPaths from the main view page
 export { getStaticProps, getStaticPaths } from "./index";
 
-export default function EmbedPage(props: ViewPageProps) {
+function EmbedPageInner(props: ViewPageProps) {
   const router = useRouter();
   const [isEmbedded, setIsEmbedded] = useState<boolean | null>(null);
   const analytics = useAnalytics();
+  const urlPasscode = useUrlPasscode();
 
   useEffect(() => {
     // Only run when router is ready and linkId is present
@@ -71,6 +74,7 @@ export default function EmbedPage(props: ViewPageProps) {
     d: string;
     previewToken?: string;
   };
+  const disableEditPassword = !!disableEditEmail && !!urlPasscode;
   const { linkType, brand } = props.linkData;
 
   // Render the document view for DOCUMENT_LINK
@@ -120,7 +124,9 @@ export default function EmbedPage(props: ViewPageProps) {
           useAdvancedExcelViewer={props.useAdvancedExcelViewer}
           previewToken={previewToken}
           disableEditEmail={!!disableEditEmail}
-          useCustomAccessForm={props.useCustomAccessForm}
+          urlPasscode={urlPasscode}
+          disableEditPassword={disableEditPassword}
+          hideFooterOnAccessForm={props.hideFooterOnAccessForm}
           verifiedEmail={verifiedEmail}
           isEmbedded
         />
@@ -171,11 +177,23 @@ export default function EmbedPage(props: ViewPageProps) {
           brand={brand}
           previewToken={previewToken}
           disableEditEmail={!!disableEditEmail}
-          useCustomAccessForm={props.useCustomAccessForm}
+          urlPasscode={urlPasscode}
+          disableEditPassword={disableEditPassword}
+          hideFooterOnAccessForm={props.hideFooterOnAccessForm}
           verifiedEmail={verifiedEmail}
           isEmbedded
         />
       </div>
     );
   }
+}
+
+export default function EmbedPage(props: ViewPageProps) {
+  const locale = props.i18n?.locale ?? "en";
+  const resources = props.i18n?.resources ?? {};
+  return (
+    <ViewerI18nProvider locale={locale} resources={resources}>
+      <EmbedPageInner {...props} />
+    </ViewerI18nProvider>
+  );
 }

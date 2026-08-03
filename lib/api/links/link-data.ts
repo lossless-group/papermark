@@ -1,3 +1,5 @@
+import { resolvePublicLinkMeta } from "@/ee/features/branding/lib/resolve-public-link-meta";
+import type { ResolvedPublicLinkMeta } from "@/ee/features/branding/lib/resolve-public-link-meta";
 import {
   Brand,
   DataroomBrand,
@@ -10,10 +12,8 @@ import {
 } from "@prisma/client";
 
 import { getFeatureFlags } from "@/lib/featureFlags";
-import prisma from "@/lib/prisma";
 import { resolveDataroomIndexEnabledForViewer } from "@/lib/featureFlags/dataroom-index-viewer";
-import { resolvePublicLinkMeta } from "@/ee/features/branding/lib/resolve-public-link-meta";
-import type { ResolvedPublicLinkMeta } from "@/ee/features/branding/lib/resolve-public-link-meta";
+import prisma from "@/lib/prisma";
 import { sortItemsByIndexAndName } from "@/lib/utils/sort-items-by-index-name";
 
 // ============================================================================
@@ -25,6 +25,7 @@ type LinkFetchStatus =
   | "not_found"
   | "archived"
   | "deleted"
+  | "expired"
   | "free"
   | "frozen";
 
@@ -327,6 +328,7 @@ export async function fetchDataroomLinkData({
       hideFolderIconsInMain: true,
       ctaLabel: true,
       ctaUrl: true,
+      defaultLanguage: true,
     },
   });
 
@@ -347,6 +349,7 @@ export async function fetchDataroomLinkData({
       viewerLayoutPreset: true,
       viewerHeaderStyle: true,
       hideFolderIconsInMain: true,
+      defaultLanguage: true,
     },
   });
 
@@ -384,6 +387,12 @@ export async function fetchDataroomLinkData({
       false,
     ctaLabel: dataroomBrand?.ctaLabel ?? teamBrand?.ctaLabel ?? null,
     ctaUrl: dataroomBrand?.ctaUrl ?? teamBrand?.ctaUrl ?? null,
+    // Viewer i18n: dataroom-level setting wins, else team-level, else en.
+    // Read by `buildViewerI18nPageProps` to pick the locale + bundles.
+    defaultLanguage:
+      (dataroomBrand as any)?.defaultLanguage ??
+      (teamBrand as any)?.defaultLanguage ??
+      "en",
   };
 
   // Extract access controls from either ViewerGroup or PermissionGroup
@@ -526,6 +535,7 @@ export async function fetchDataroomDocumentLinkData({
       hideFolderIconsInMain: true,
       ctaLabel: true,
       ctaUrl: true,
+      defaultLanguage: true,
     },
   });
 
@@ -546,6 +556,7 @@ export async function fetchDataroomDocumentLinkData({
       viewerLayoutPreset: true,
       viewerHeaderStyle: true,
       hideFolderIconsInMain: true,
+      defaultLanguage: true,
     },
   });
 
@@ -581,6 +592,10 @@ export async function fetchDataroomDocumentLinkData({
       false,
     ctaLabel: dataroomBrand?.ctaLabel ?? teamBrand?.ctaLabel ?? null,
     ctaUrl: dataroomBrand?.ctaUrl ?? teamBrand?.ctaUrl ?? null,
+    defaultLanguage:
+      (dataroomBrand as any)?.defaultLanguage ??
+      (teamBrand as any)?.defaultLanguage ??
+      "en",
   };
 
   return { linkData, brand };
@@ -634,7 +649,11 @@ export async function fetchDocumentLinkData({
       logo: true,
       brandColor: true,
       accentColor: true,
+      accentButtonColor: true,
       welcomeMessage: true,
+      ctaLabel: true,
+      ctaUrl: true,
+      defaultLanguage: true,
     },
   });
 
@@ -676,6 +695,7 @@ async function processLinkData(
           logo: true,
           brandColor: true,
           accentColor: true,
+          defaultLanguage: true,
         },
       });
       brand = teamBrand;
@@ -781,7 +801,6 @@ async function processLinkData(
     }
   }
 
-  // Only include agreement if enabled (no need to expose it otherwise)
   const sanitizedAgreement =
     link.enableAgreement && link.agreement
       ? {
@@ -789,6 +808,7 @@ async function processLinkData(
           name: link.agreement.name,
           content: link.agreement.content,
           contentType: link.agreement.contentType,
+          signingProvider: link.agreement.signingProvider,
           requireName: link.agreement.requireName,
         }
       : null;
@@ -907,11 +927,10 @@ async function processLinkData(
 
   let dataroomIndexEnabledForViewer: boolean | undefined;
   if (linkType === "DATAROOM_LINK" && link.teamId) {
-    dataroomIndexEnabledForViewer =
-      await resolveDataroomIndexEnabledForViewer({
-        teamId: link.teamId,
-        teamPlan,
-      });
+    dataroomIndexEnabledForViewer = await resolveDataroomIndexEnabledForViewer({
+      teamId: link.teamId,
+      teamPlan,
+    });
   }
 
   // Serialize to convert Date objects to strings (required for Next.js getStaticProps)
@@ -957,6 +976,10 @@ export async function fetchLinkDataById({
     return { status: "archived" };
   }
 
+  if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+    return { status: "expired" };
+  }
+
   return processLinkData(link, { dataroomDocumentId, isCustomDomain: false });
 }
 
@@ -993,6 +1016,10 @@ export async function fetchLinkDataByDomainSlug({
 
   if (link.isArchived) {
     return { status: "archived" };
+  }
+
+  if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+    return { status: "expired" };
   }
 
   return processLinkData(link, { dataroomDocumentId, isCustomDomain: true });

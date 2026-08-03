@@ -1,14 +1,19 @@
-import { useRouter } from "next/router";
-
 import { type CSSProperties, type ReactNode, useMemo, useState } from "react";
 
 import {
   type DataroomCardLayout,
   type DataroomViewerHeaderStyle,
 } from "@/ee/features/branding/lib/dataroom-viewer-layout";
+import { useBrandingPreviewParams } from "@/ee/features/branding/lib/use-branding-preview-params";
 
 import { PlayIcon } from "lucide-react";
 
+import {
+  buildViewerI18nPageProps,
+  type ViewerI18nPageProps,
+} from "@/lib/i18n/viewer-page-props";
+
+import { ViewerI18nProvider } from "@/components/view/viewer-i18n-provider";
 import { ViewFolderTree } from "@/components/datarooms/folders";
 import {
   Breadcrumb,
@@ -19,6 +24,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { cn } from "@/lib/utils";
+import { determineTextColor } from "@/lib/utils/determine-text-color";
 import { useLogoTone } from "@/ee/features/branding/lib/use-logo-tone";
 import { classifyDataroomBanner } from "@/ee/features/branding/lib/dataroom-banner";
 import { getDataroomPreviewDataset } from "@/ee/features/branding/lib/dataroom-preview-presets";
@@ -185,9 +191,9 @@ function VideoBannerPreview({
 }
 
 /** Preview iframe: align with dataroom viewer (sharp corners, optional folder tree). */
-export default function ViewPage() {
-  const router = useRouter();
-  const [previewFolderId, setPreviewFolderId] = useState<string | null>(null);
+export default function ViewPage({ i18n }: ViewerI18nPageProps) {
+  // Seeded from the URL on first paint, then live-updated over postMessage so
+  // the editor never has to reload (and therefore never flashes) this iframe.
   const {
     brandLogo,
     brandColor,
@@ -201,20 +207,8 @@ export default function ViewPage() {
     accentButtonColor,
     viewerHeaderStyle: viewerHeaderStyleParam,
     hideFolderIconsInMain: hideFolderIconsMainParam,
-  } = router.query as {
-    brandLogo?: string;
-    brandColor?: string;
-    brandBanner?: string;
-    accentColor?: string;
-    applyAccentColorToDataroomView?: string;
-    cardLayout?: string;
-    showFolderTree?: string;
-    ctaLabel?: string;
-    ctaUrl?: string;
-    accentButtonColor?: string;
-    viewerHeaderStyle?: string;
-    hideFolderIconsInMain?: string;
-  };
+  } = useBrandingPreviewParams();
+  const [previewFolderId, setPreviewFolderId] = useState<string | null>(null);
 
   // Always the same "Example Virtual Data Room" — keeps the preview consistent
   // across pages and avoids depending on per-team onboarding answers.
@@ -333,15 +327,21 @@ export default function ViewPage() {
     );
 
   return (
-    <div
-      className="min-h-screen bg-white"
-      style={
-        {
-          backgroundColor: dataroomViewBackgroundColor,
-        } as CSSProperties
-      }
-    >
-      {/* Header — matches live viewer modes */}
+    // The cards below call `useTranslation` — without an initialized i18n
+    // instance they'd render the raw `Updated {{when}}` template on the client
+    // while the server interpolates it, tripping a hydration mismatch. Wrapping
+    // the tree in the same provider the live viewer uses keeps both sides in
+    // lockstep.
+    <ViewerI18nProvider locale={i18n.locale} resources={i18n.resources}>
+      <div
+        className="min-h-screen bg-white"
+        style={
+          {
+            backgroundColor: dataroomViewBackgroundColor,
+          } as CSSProperties
+        }
+      >
+        {/* Header — matches live viewer modes */}
       <nav
         className={cn(
           headerMode === "SPLIT"
@@ -477,10 +477,13 @@ export default function ViewPage() {
                       href={ctaUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex shrink-0 items-center justify-center rounded-md px-4 py-2 text-sm font-medium text-white"
+                      className="inline-flex shrink-0 items-center justify-center rounded-md px-4 py-2 text-sm font-medium"
                       style={{
                         backgroundColor:
                           accentButtonColor || brandColor || "#111827",
+                        color: determineTextColor(
+                          accentButtonColor || brandColor || "#111827",
+                        ),
                       }}
                     >
                       {ctaLabel}
@@ -600,11 +603,13 @@ export default function ViewPage() {
                     href={ctaUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white"
+                    className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium"
                     style={{
                       backgroundColor:
                         accentButtonColor || brandColor || "#ffffff",
-                      color: accentButtonColor ? "#ffffff" : "#000000",
+                      color: determineTextColor(
+                        accentButtonColor || brandColor || "#ffffff",
+                      ),
                     }}
                   >
                     {ctaLabel}
@@ -878,6 +883,18 @@ export default function ViewPage() {
           </div>
         </div>
       </ViewerSurfaceThemeProvider>
-    </div>
+      </div>
+    </ViewerI18nProvider>
   );
 }
+
+/**
+ * Load the viewer translation bundles at build time so the preview iframe
+ * renders translated card copy identically on the server and the client. We
+ * always use the default locale here — the branding preview isn't a live
+ * visitor surface, so there's no per-brand language to resolve.
+ */
+export const getStaticProps = async () => {
+  const props = await buildViewerI18nPageProps(null);
+  return { props };
+};

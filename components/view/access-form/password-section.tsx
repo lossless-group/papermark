@@ -2,6 +2,7 @@ import { Dispatch, SetStateAction, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { Brand, DataroomBrand } from "@prisma/client";
+import { useTranslation } from "react-i18next";
 
 import Eye from "@/components/shared/icons/eye";
 import EyeOff from "@/components/shared/icons/eye-off";
@@ -13,13 +14,16 @@ export default function PasswordSection({
   data,
   setData,
   brand,
+  disableEditPassword,
 }: {
   data: DEFAULT_ACCESS_FORM_TYPE;
   setData: Dispatch<SetStateAction<DEFAULT_ACCESS_FORM_TYPE>>;
   brand?: Partial<Brand> | Partial<DataroomBrand> | null;
+  disableEditPassword?: boolean;
 }) {
   const { password } = data;
   const theme = useAccessFormTheme();
+  const { t } = useTranslation("access-form");
   const [showPassword, setShowPassword] = useState<boolean>(false);
 
   return (
@@ -29,7 +33,7 @@ export default function PasswordSection({
         className="block text-sm font-medium leading-6 text-white"
         style={{ color: theme.textColor }}
       >
-        Passcode
+        {t("fields.password.label", "Passcode")}
       </label>
       <div className="relative">
         <input
@@ -45,13 +49,14 @@ export default function PasswordSection({
             borderColor: theme.controlBorderColor,
             "--access-placeholder": theme.controlPlaceholderColor,
             "--access-input-focus": theme.controlBorderStrongColor,
-            color: theme.textColor,
+            color: disableEditPassword ? theme.subtleTextColor : theme.textColor,
           } as CSSProperties}
           value={password || ""}
-          placeholder="Enter passcode"
+          placeholder={t("fields.password.placeholder", "Enter passcode")}
           onChange={(e) => {
             setData({ ...data, password: e.target.value });
           }}
+          disabled={disableEditPassword}
           aria-invalid="true"
           data-1p-ignore
         />

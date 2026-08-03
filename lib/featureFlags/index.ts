@@ -10,13 +10,19 @@ export type BetaFeatures =
   | "inDocumentLinks"
   | "usStorage"
   | "dataroomIndex"
+  | "dataroomFreeze"
   | "slack"
   | "annotations"
   | "dataroomInvitations"
   | "workflows"
   | "ai"
   | "sso"
-  | "textSelection";
+  | "textSelection"
+  | "redaction"
+  | "requestList"
+  | "logoOnAccessForm"
+  | "htmlDocuments"
+  | "hideFooterOnAccessForm";
 
 type BetaFeaturesRecord = Record<BetaFeatures, string[]>;
 
@@ -31,6 +37,7 @@ export const getFeatureFlags = async ({ teamId }: { teamId?: string }) => {
     inDocumentLinks: false,
     usStorage: false,
     dataroomIndex: false,
+    dataroomFreeze: false,
     slack: false,
     annotations: false,
     dataroomInvitations: false,
@@ -38,6 +45,11 @@ export const getFeatureFlags = async ({ teamId }: { teamId?: string }) => {
     ai: false,
     sso: false,
     textSelection: false,
+    redaction: false,
+    requestList: false,
+    logoOnAccessForm: false,
+    htmlDocuments: false,
+    hideFooterOnAccessForm: false,
   };
 
   // Return all features as false if edge config is not available

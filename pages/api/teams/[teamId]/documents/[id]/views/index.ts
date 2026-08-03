@@ -2,10 +2,12 @@ import { NextApiRequest, NextApiResponse } from "next";
 
 import { isTeamPaused } from "@/ee/features/billing/cancellation/lib/is-team-paused";
 import { authOptions } from "@/pages/api/auth/[...nextauth]";
-import { View } from "@prisma/client";
+import { Prisma, View } from "@prisma/client";
 import { JsonValue } from "@prisma/client/runtime/library";
 import { getServerSession } from "next-auth/next";
 
+import { enforceDocumentMemberScope } from "@/lib/api/rbac/guard";
+import { isDataroomScopedRole } from "@/lib/api/rbac/permissions";
 import { LIMITS } from "@/lib/constants";
 import { errorhandler } from "@/lib/errorHandler";
 import prisma from "@/lib/prisma";
@@ -49,7 +51,14 @@ type ViewWithExtras = View & {
   agreementResponse: {
     id: string;
     agreementId: string;
-    agreement: { name: string };
+    signingStatus: string;
+    signedAt: Date | null;
+    completedAt: Date | null;
+    agreement: {
+      name: string;
+      contentType: string;
+      signingProvider: string;
+    };
   } | null;
 };
 
@@ -180,6 +189,13 @@ export default async function handle(
 
     const { teamId, id: docId } = req.query as { teamId: string; id: string };
 
+    // Optional dataroom scoping. When `dataroomId` is provided the views are
+    // partitioned into the room's own visits ("dataroom") and the document's
+    // direct-link visits ("other"). This powers the dataroom document page,
+    // which shows room visits primarily and keeps direct-link visits separate.
+    const dataroomId = (req.query.dataroomId as string) || undefined;
+    const scope = (req.query.scope as string) || undefined;
+
     // Parse and validate pagination parameters
     const rawPage = Number.parseInt((req.query.page as string) || "1", 10);
     const rawLimit = Number.parseInt((req.query.limit as string) || "10", 10);
@@ -193,6 +209,36 @@ export default async function handle(
     const offset = (page - 1) * limit;
 
     const userId = (session.user as CustomUser).id;
+
+    if (
+      await enforceDocumentMemberScope({ userId, teamId, documentId: docId, res })
+    ) {
+      return;
+    }
+
+    // Build the dataroom scope filter. "dataroom" → only this room's views;
+    // "other" → only the document's direct-link visits (no dataroom).
+    let scopeWhere: Prisma.ViewWhereInput = {};
+    if (dataroomId) {
+      if (scope === "other") {
+        // Direct document-link visits must never be exposed to dataroom-scoped
+        // members — they are only meaningful to full team members.
+        const membership = await prisma.userTeam.findUnique({
+          where: { userId_teamId: { userId, teamId } },
+          select: { role: true },
+        });
+        if (membership && isDataroomScopedRole(membership.role)) {
+          return res.status(200).json({
+            viewsWithDuration: [],
+            hiddenViewCount: 0,
+            totalViews: 0,
+          });
+        }
+        scopeWhere = { dataroomId: null };
+      } else {
+        scopeWhere = { dataroomId };
+      }
+    }
 
     try {
       const team = await prisma.team.findUnique({
@@ -251,6 +297,7 @@ export default async function handle(
       const viewsWhereClause = {
         documentId: docId,
         isArchived: false,
+        ...scopeWhere,
         ...(pauseStartedAt && {
           viewedAt: {
             lt: pauseStartedAt,
@@ -276,6 +323,7 @@ export default async function handle(
         take: limit,
         where: {
           documentId: docId,
+          ...scopeWhere,
           ...(pauseStartedAt && {
             viewedAt: {
               lt: pauseStartedAt,
@@ -301,9 +349,14 @@ export default async function handle(
             select: {
               id: true,
               agreementId: true,
+              signingStatus: true,
+              signedAt: true,
+              completedAt: true,
               agreement: {
                 select: {
                   name: true,
+                  contentType: true,
+                  signingProvider: true,
                 },
               },
             },
@@ -333,6 +386,7 @@ export default async function handle(
         where: {
           documentId: docId,
           isArchived: false,
+          ...scopeWhere,
         },
       });
 
@@ -342,6 +396,7 @@ export default async function handle(
             where: {
               documentId: docId,
               isArchived: false,
+              ...scopeWhere,
               viewedAt: {
                 gte: pauseStartedAt,
               },
