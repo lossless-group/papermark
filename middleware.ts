@@ -61,7 +61,11 @@ export const config = {
 
 export default async function middleware(req: NextRequest, ev: NextFetchEvent) {
   const path = req.nextUrl.pathname;
-  const host = req.headers.get("host");
+  // Railway (and most proxies) deliver the public hostname via x-forwarded-host;
+  // the raw Host header can be an internal/proxy value. Prefer the forwarded host
+  // so host-based routing (isCustomDomain, api-host) matches the real domain.
+  const host =
+    req.headers.get("x-forwarded-host") || req.headers.get("host");
 
   // api.papermark.com is restricted to the v1 surface. Filesystem pages
   // (/dashboard, /settings, /login, …) would otherwise render here too,
