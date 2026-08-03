@@ -1,0 +1,4 @@
+lib/tinybird/
+Pipfile
+Pipfile.lock
+*.py
